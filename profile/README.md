@@ -34,6 +34,142 @@ custody user assets, sign swaps, or execute live-funds trades.
 | SUI Usage Credits | SUI-backed application credits with verifiable deposits and authorized withdrawal requests |
 | Automation | Scheduled monitoring, run history, in-app notifications, and Telegram integration |
 
+## Data Sources
+
+Langclaw routes each request to the providers that match its chain, topic, and
+available credentials. Results are normalized into source cards, deduplicated,
+scored, and returned with a `providerTrace` so unavailable or failed sources
+remain visible instead of being silently replaced.
+
+| Source | Data used by Langclaw | Availability |
+| --- | --- | --- |
+| Sui RPC and explorers | On-chain objects, transactions, events, balances, and proof verification | Core Sui infrastructure |
+| BlockVision | Sui coin holders, concentration, whale labels, and holder snapshots | Sui-native smart-money analysis |
+| Dune | Sui DEX trades, wallet accumulation flows, saved analytics queries, and Strategy Lab history | Configured query/API access |
+| Surf | Crypto research, market context, discovery, and smart-money candidate signals | Primary premium provider when configured |
+| Elfa | Social intelligence, project mentions, and narrative signals | Optional premium provider |
+| Brave and Tavily | Web, documentation, news, and fallback research | Used according to configured search credentials |
+| X | Public social posts and engagement signals | Direct API or search fallback |
+| GitHub | Repository activity, project metadata, and builder signals | Configured token |
+| HackQuest | Ecosystem project and builder-directory context | Public directory |
+| DEX Screener | Token profiles, pair liquidity, volume, transactions, boosts, and pair discovery | Public market API |
+| DeFiLlama | Protocol TVL, yields, fees, and ecosystem momentum | Public market API |
+| CoinGecko and GeckoTerminal | Aggregated market data, token metadata, trending pools, and pool-level activity | Public or configured API access |
+| Nansen | Labeled smart-money flows for Mantle in the current structured workflow | Optional non-Sui provider |
+| Alchemy, explorer APIs, and GoPlus | Token metadata, transfers, balances, and security checks for explicitly supported non-Sui analysis | Optional; not the default Sui path |
+
+Provider output is evidence, not ground truth by itself. Langclaw preserves
+source URLs, timestamps, coverage gaps, and false-positive checks in the final
+research payload.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Clients["Clients and Entry Points"]
+    UI["Next.js Web App"]
+    Wallet["Sui Wallet"]
+    Telegram["Telegram"]
+    APIClient["API Clients"]
+  end
+
+  subgraph API["Backend API and Account Layer"]
+    Routes["Chat, Discover, Strategy, Memory, Proof APIs"]
+    Auth["Wallet Sessions and API Keys"]
+    Usage["SUI Usage Ledger and Vault Verification"]
+    Automation["Schedules, Webhooks, and Notifications"]
+  end
+
+  subgraph Agent["Agent and Research Runtime"]
+    Recall["Private Memory Recall"]
+    Planner["Planner and Tool Router"]
+    Providers["Provider Orchestration"]
+    Normalize["Source Normalization and Deduplication"]
+    Score["Signal Scoring and Risk Checks"]
+    Synthesis["OpenAI or OpenClaw Synthesis"]
+    Report["Reports, Provider Trace, and Evidence Bundle"]
+  end
+
+  subgraph Sources["External Data Sources"]
+    SuiData["Sui RPC, Explorers, and BlockVision"]
+    Analytics["Dune, DeFiLlama, and Strategy Data"]
+    Markets["Surf, DEX Screener, CoinGecko, and GeckoTerminal"]
+    Discovery["Elfa, X, Brave, Tavily, GitHub, and HackQuest"]
+    Optional["Optional Non-Sui: Nansen, Alchemy, Explorer APIs, and GoPlus"]
+  end
+
+  subgraph State["Persistence and Verifiable Memory"]
+    Supabase["Supabase: Accounts, Usage, Watchlists, and Runs"]
+    Seal["Seal: Owner-Only Encryption and Recall"]
+    Walrus["Walrus: Encrypted Memory and Agent Handoffs"]
+    Move["Sui Move: Decisions, Journal, Vault, and Memory Proofs"]
+  end
+
+  UI --> Routes
+  Wallet --> Auth
+  Wallet --> Usage
+  Telegram --> Automation
+  APIClient --> Routes
+
+  Routes --> Auth
+  Auth --> Recall
+  Usage --> Planner
+  Automation --> Planner
+  Recall --> Planner
+  Planner --> Providers
+
+  Providers --> SuiData
+  Providers --> Analytics
+  Providers --> Markets
+  Providers --> Discovery
+  Providers --> Optional
+
+  SuiData --> Normalize
+  Analytics --> Normalize
+  Markets --> Normalize
+  Discovery --> Normalize
+  Optional --> Normalize
+
+  Normalize --> Score
+  Score --> Synthesis
+  Synthesis --> Report
+  Report --> Routes
+  Report --> Supabase
+  Report --> Seal
+  Seal --> Walrus
+  Walrus --> Move
+  Usage --> Supabase
+  Usage --> Move
+  Recall --> Seal
+  Seal --> Recall
+```
+
+### Research Data Flow
+
+1. A wallet-authenticated request enters chat, discovery, strategy, or
+   automation.
+2. The planner preserves the requested Sui scope and selects relevant provider
+   tools.
+3. Providers run in parallel where possible; their output becomes normalized
+   source cards and structured on-chain tool results.
+4. Langclaw deduplicates evidence, scores signal quality, checks risks and false
+   positives, and records provider failures as explicit source gaps.
+5. OpenAI or OpenClaw synthesizes the final answer from the evidence bundle.
+6. The backend returns deterministic `signals`, `report`, `alphaSignal`,
+   `providerTrace`, usage metadata, and optional Sui proof metadata.
+
+### Private Memory and Proof Flow
+
+1. Langclaw discovers prior memory pointers from the owner's index and Sui
+   metadata.
+2. The encrypted blob is fetched from Walrus and Seal authorizes owner-only
+   decryption.
+3. Recalled context is injected into the new research run.
+4. The resulting evidence artifact is encrypted with Seal and stored on Walrus.
+5. Langclaw reads the blob back and verifies it before creating a public proof.
+6. Only the content hash, Walrus references, Seal policy, run ID, and owner are
+   recorded through the Sui Move `memory_registry`; plaintext remains private.
+
 ## Sui, Walrus, and Seal Proof Layer
 
 Langclaw separates private data from public verification:
